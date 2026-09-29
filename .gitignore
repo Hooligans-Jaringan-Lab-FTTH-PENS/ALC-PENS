@@ -1,0 +1,20 @@
+# Environment and credentials (SANGAT PENTING: Jangan push kredensial asli)
+config.env
+.env
+*.local
+
+# State files & logs (jika ada yang terbuat di lokal)
+*.log
+*.tmp
+*.state
+captive_state.txt
+last_notified.txt
+rekap_mingguan.txt
+
+# Editor & OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store

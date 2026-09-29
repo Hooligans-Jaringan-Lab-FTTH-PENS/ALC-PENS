@@ -1,0 +1,13 @@
+[Unit]
+Description=Auto Login Captive Portal PENS
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash -c 'while true; do /usr/local/bin/captive.sh; sleep 30; done'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

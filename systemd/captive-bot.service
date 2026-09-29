@@ -1,0 +1,13 @@
+[Unit]
+Description=Telegram Bot Listener for Auto Login Captive PENS
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/telegram_bot_listener.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
