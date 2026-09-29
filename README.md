@@ -86,11 +86,28 @@ Sesuaikan parameter berikut:
    CHAT_ID="-100xxxxxxxxx"
    ```
 
-3. **Interface Jaringan**
-   Sesuaikan dengan interface yang terhubung ke jaringan PENS (cek dengan perintah `ip link`):
+3. **Interface Jaringan (`IFACE`)**
+   Skrip ini secara bawaan menggunakan koneksi **kabel LAN** dengan interface `eth0` (sesuai setup PC di lab pembuat). Jika Anda menggunakannya di lab atau perangkat lain, sesuaikan nilai `IFACE`:
+   - **Koneksi Kabel (LAN)**: Jika di lab Anda menggunakan LAN, sesuaikan nama interfacenya (biasanya `eth0`, `enp3s0`, atau `eno1`).
+   - **Koneksi Wi-Fi**: Jika perangkat/laptop Anda terhubung menggunakan Wi-Fi kampus, ubah interfacenya ke perangkat wireless Anda, misalnya `wlan0`, `wlan1`, `wlp2s0`, dan seterusnya.
+   
+   > 💡 **Cara cek nama interface:** Jalankan perintah `ip link` atau `ip a` di terminal, lalu perhatikan nama interface yang statusnya `state UP`.
    ```bash
-   IFACE="eth0"   # atau enp3s0 (kabel), wlan0 (WiFi)
+   IFACE="eth0"   # ganti ke wlan0 / wlan1 jika pakai Wi-Fi
    ```
+
+4. **URL Captive Portal & Port (`LOGIN_URL`)**
+   Nilai bawaan skrip ini mengarah ke `https://iac7.pens.ac.id:8009/index.php?zone=misc` karena disesuaikan dengan koneksi LAN di lab pembuat. Namun, **setiap gedung, lab, lantai, maupun access point Wi-Fi di PENS memiliki host `iac` dan port yang berbeda-beda** (misalnya `iac1`, `iac2`, `iac7`, `iac10` dengan port `8008`, `8009`, dll).
+
+   **Cara mengetahui URL portal di lokasi Anda:**
+   1. Hubungkan perangkat ke jaringan kampus (baik lewat kabel LAN maupun Wi-Fi).
+   2. Buka browser dan kunjungi sembarang situs HTTP (misal: `http://neverssl.com` atau `http://google.com`).
+   3. Browser akan otomatis dialihkan (*redirect*) ke portal login PENS.
+   4. Perhatikan address bar browser Anda, lalu salin URL lengkapnya ke konfigurasi:
+      ```bash
+      LOGIN_URL="https://iac7.pens.ac.id:8009/index.php?zone=misc" # sesuaikan iac dan port Anda
+      ```
+   *(Header `ORIGIN` akan otomatis diekstrak oleh skrip dari `LOGIN_URL` tersebut).*
 
 Simpan file (`Ctrl+O`, `Enter`, lalu `Ctrl+X`).
 

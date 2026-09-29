@@ -21,6 +21,11 @@ fi
 # shellcheck source=/dev/null
 source "$CONFIG_FILE"
 
+# Ekstraksi otomatis ORIGIN dari LOGIN_URL jika tidak diset manual
+if [ -z "$ORIGIN" ]; then
+    ORIGIN=$(echo "$LOGIN_URL" | sed -E 's|^(https?://[^/]+).*|\1|')
+fi
+
 # Validasi Akun
 NUM_ACCOUNTS=${#USERS[@]}
 NUM_PASSWORDS=${#PASSWORDS[@]}
