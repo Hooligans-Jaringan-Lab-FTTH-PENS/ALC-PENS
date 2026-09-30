@@ -101,11 +101,15 @@ rm -f /usr/local/bin/captive_v2.sh /usr/local/bin/captive_v2_baru2.sh
 echo -e "\n${YELLOW}[4/5] Memasang skrip ke /usr/local/bin/...${NC}"
 cp "$SCRIPT_DIR/scripts/captive.sh" /usr/local/bin/captive.sh
 cp "$SCRIPT_DIR/scripts/telegram_bot_listener.sh" /usr/local/bin/telegram_bot_listener.sh
+cp "$SCRIPT_DIR/scripts/cek_captive.sh" /usr/local/bin/cek_captive.sh
 
 # Beri izin eksekusi
 chmod +x /usr/local/bin/captive.sh
 chmod +x /usr/local/bin/telegram_bot_listener.sh
+chmod +x /usr/local/bin/cek_captive.sh
 
+# Symlink agar bisa langsung dipanggil /cek_captive.sh atau cek_captive.sh
+ln -sf /usr/local/bin/cek_captive.sh /cek_captive.sh
 # Symlink kompatibilitas jika masih ada sistem lama yang memanggil captive_v2_baru.sh
 ln -sf /usr/local/bin/captive.sh /usr/local/bin/captive_v2_baru.sh
 echo -e "${GREEN}✓ Skrip berhasil disalin dan diberi izin eksekusi.${NC}"

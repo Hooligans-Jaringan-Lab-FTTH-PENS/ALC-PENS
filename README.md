@@ -24,6 +24,7 @@ AutoLoginCaptive/
 ├── config.env.example          # Contoh file konfigurasi (dummy)
 ├── scripts/
 │   ├── captive.sh              # Skrip utama cek internet & auto-login
+│   ├── cek_captive.sh          # Skrip ringkas cek akun aktif di CLI VM
 │   └── telegram_bot_listener.sh# Bot Telegram listener (/cek_akun)
 └── systemd/
     ├── captive.service         # Systemd service auto-login (loop 30s)
@@ -140,6 +141,13 @@ journalctl -u captive.service -f
 Untuk mencoba login sekali secara manual:
 ```bash
 sudo /usr/local/bin/captive.sh
+```
+
+Untuk cek akun aktif & status koneksi langsung dari terminal VM:
+```bash
+cek_captive.sh
+# atau:
+/cek_captive.sh
 ```
 
 ---

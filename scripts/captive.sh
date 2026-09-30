@@ -109,6 +109,51 @@ do_logout() {
 }
 
 # ------------------------------------------------------------------------------
+# Fungsi: Pengecekan Koneksi Internet (Toleran Jitter & Multi-Endpoint)
+# ------------------------------------------------------------------------------
+is_online() {
+    local test_urls=(
+        "$CHECK_URL"
+        "http://connectivitycheck.gstatic.com/generate_204"
+        "http://cp.cloudflare.com/generate_204"
+    )
+
+    # Lakukan 2 kali percobaan.
+    # PENTING: HANYA HTTP 204 yang menandakan internet aktif!
+    # Jika terkena captive portal, server akan me-redirect dengan HTTP 302 atau memberi HTTP 200 form login.
+    for attempt in 1 2; do
+        for url in "${test_urls[@]}"; do
+            local code
+            code=$(curl -s -o /dev/null -w "%{http_code}" --interface "$IFACE" \
+                --connect-timeout 4 --max-time 6 "$url" 2>/dev/null || echo "000")
+            if [ "$code" = "204" ]; then
+                return 0
+            fi
+        done
+        [ "$attempt" -lt 2 ] && sleep 1
+    done
+
+    return 1
+}
+
+# ------------------------------------------------------------------------------
+# Fungsi: Cek apakah portal PENS sudah menganggap perangkat ini login
+# ------------------------------------------------------------------------------
+is_portal_logged_in() {
+    local portal_html
+    portal_html=$(curl -k -s --interface "$IFACE" --connect-timeout 5 --max-time 8 "$LOGIN_URL" 2>/dev/null || true)
+    # Jika halaman portal menampilkan form login (auth_user), berarti belum login
+    if echo "$portal_html" | grep -q "auth_user"; then
+        return 1
+    fi
+    # Jika ada indikasi tombol disconnect / logout_id tanpa form login
+    if echo "$portal_html" | grep -qiE '(logout_id|value="Disconnect"|value="Logout"|action="logout")'; then
+        return 0
+    fi
+    return 1
+}
+
+# ------------------------------------------------------------------------------
 # Fungsi: Status Singkat (CLI)
 # ------------------------------------------------------------------------------
 do_status() {
@@ -122,11 +167,10 @@ do_status() {
         USERNAME="Index tidak valid"
     fi
 
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --interface "$IFACE" --connect-timeout 4 --max-time 5 "$CHECK_URL" 2>/dev/null || echo "000")
-    if [ "$HTTP_CODE" = "204" ]; then
+    if is_online; then
         NET_STATUS="Online (Terhubung)"
     else
-        NET_STATUS="Offline / Perlu Login (HTTP $HTTP_CODE)"
+        NET_STATUS="Offline / Perlu Login"
     fi
 
     SERVICE_STATUS=$(systemctl is-active captive.service 2>/dev/null || echo "unknown")
@@ -176,11 +220,18 @@ if ! ip link show "$IFACE" 2>/dev/null | grep -q "state UP"; then
     exit 0
 fi
 
-# Cek apakah internet sudah tersambung (HTTP 204 dari Google gstatic)
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --interface "$IFACE" --connect-timeout 4 --max-time 5 "$CHECK_URL" 2>/dev/null || echo "000")
-if [ "$HTTP_CODE" = "204" ]; then
-    # Internet sudah aktif, tidak perlu login
+# Cek apakah internet sudah tersambung (multi-endpoint + retry)
+if is_online; then
+    # Internet sudah aktif dan stabil, tidak perlu login
     exit 0
+fi
+
+# Jika internet offline tapi portal masih mendeteksi sesi lama (zombie session),
+# lakukan logout bersih terlebih dahulu agar sesi tidak bentrok/tabrakan di pfSense
+if is_portal_logged_in; then
+    echo "[WARN] Terdeteksi sesi portal lama yang menggantung (stale / zombie). Melakukan logout bersih terlebih dahulu..."
+    do_logout >/dev/null 2>&1 || true
+    sleep 2
 fi
 
 # ------------------------------------------------------------------------------
@@ -204,7 +255,7 @@ while [ $ATTEMPTS -lt $NUM_ACCOUNTS ]; do
     PASSWORD="${PASSWORDS[$CURRENT_INDEX]}"
 
     DATA="auth_user=${USERNAME}&auth_pass=${PASSWORD}&redirurl=&accept=Login"
-    RESPONSE=$(curl -k -s --interface "$IFACE" --connect-timeout 8 --max-time 10 -X POST "$LOGIN_URL" \
+    RESPONSE=$(curl -k -s --interface "$IFACE" --connect-timeout 8 --max-time 12 -X POST "$LOGIN_URL" \
         -c "$COOKIE_FILE" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -H "Origin: $ORIGIN" -H "Referer: $LOGIN_URL" \
@@ -214,7 +265,13 @@ while [ $ATTEMPTS -lt $NUM_ACCOUNTS ]; do
     if echo "$RESPONSE" | grep -q "You are already logged in 3 times" || echo "$RESPONSE" | grep -iq "login failed"; then
         CURRENT_INDEX=$(( (CURRENT_INDEX + 1) % NUM_ACCOUNTS ))
         ATTEMPTS=$((ATTEMPTS + 1))
-    else
+        sleep 1
+        continue
+    fi
+
+    # Verifikasi apakah internet benar-benar terhubung setelah request login
+    sleep 2
+    if is_online; then
         # 1. Simpan State Akun Aktif
         echo "$TODAY:$CURRENT_INDEX" > "$STATE_FILE"
 
@@ -289,7 +346,13 @@ EOF
         fi
 
         SUCCESS=1
+        echo "[SUCCESS] Berhasil terhubung ke internet dengan akun: $USERNAME"
         break
+    else
+        echo "[WARN] POST login terkirim untuk $USERNAME tapi internet belum terhubung. Mencoba akun berikutnya..."
+        CURRENT_INDEX=$(( (CURRENT_INDEX + 1) % NUM_ACCOUNTS ))
+        ATTEMPTS=$((ATTEMPTS + 1))
+        sleep 1
     fi
 done
 

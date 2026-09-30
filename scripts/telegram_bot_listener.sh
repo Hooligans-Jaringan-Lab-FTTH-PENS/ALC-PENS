@@ -57,6 +57,25 @@ ZONE=$(echo "$LOGIN_URL" | grep -oP '(?<=zone=)[^&]+' 2>/dev/null || echo "misc"
 NUM_ACCOUNTS=${#USERS[@]}
 
 # ------------------------------------------------------------------------------
+# Fungsi Pengecekan Koneksi Internet (Toleran Jitter & Multi-Endpoint)
+# ------------------------------------------------------------------------------
+check_net_online() {
+    local test_urls=(
+        "$CHECK_URL"
+        "http://connectivitycheck.gstatic.com/generate_204"
+        "http://cp.cloudflare.com/generate_204"
+    )
+    for url in "${test_urls[@]}"; do
+        local code
+        code=$(curl -s -o /dev/null -w "%{http_code}" --interface "$IFACE" --connect-timeout 4 --max-time 6 "$url" 2>/dev/null || echo "000")
+        if [ "$code" = "204" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# ------------------------------------------------------------------------------
 # Tombol Menu Interaktif Telegram (Inline Keyboard)
 # ------------------------------------------------------------------------------
 INLINE_KEYBOARD_JSON='{"inline_keyboard":[[{"text":"📊 Status Captive","callback_data":"/status"},{"text":"📜 Riwayat Login","callback_data":"/riwayat"}],[{"text":"🚪 Logout & Login Ulang","callback_data":"/logout"},{"text":"🌐 URL Portal","callback_data":"/url"}],[{"text":"⚙️ Status Service","callback_data":"/service"},{"text":"🖥 Info VM & Server","callback_data":"/vm"}]]}'
@@ -144,11 +163,10 @@ get_service_report() {
     cap_status=$(get_service_status_text "captive.service")
     bot_status=$(get_service_status_text "captive-bot.service")
 
-    net_code=$(curl -s -o /dev/null -w "%{http_code}" --interface "$IFACE" --connect-timeout 4 --max-time 5 "$CHECK_URL" 2>/dev/null || echo "000")
-    if [ "$net_code" = "204" ]; then
+    if check_net_online; then
         net_status="🟢 Online (Terhubung)"
     else
-        net_status="🔴 Offline / Perlu Login (HTTP $net_code)"
+        net_status="🔴 Offline / Perlu Login"
     fi
 
     current_index=$(cut -d':' -f2 "$STATE_FILE" 2>/dev/null || echo "-1")
@@ -217,11 +235,10 @@ get_vm_info() {
     [ "$cap_active" = "active" ] && cap_label="🟢 HIDUP (Running)" || cap_label="🔴 MATI / STOPPED"
     [ "$bot_active" = "active" ] && bot_label="🟢 HIDUP (Running)" || bot_label="🔴 MATI"
 
-    net_code=$(curl -s -o /dev/null -w "%{http_code}" --interface "$IFACE" --connect-timeout 4 --max-time 5 "$CHECK_URL" 2>/dev/null || echo "000")
-    if [ "$net_code" = "204" ]; then
-        net_status="🟢 Online (HTTP 204)"
+    if check_net_online; then
+        net_status="🟢 Online (Terhubung)"
     else
-        net_status="🔴 Offline (HTTP $net_code)"
+        net_status="🔴 Offline / Perlu Login"
     fi
 
     local current_index
@@ -266,11 +283,10 @@ get_url_info() {
     local logout_link
     local detected_redirect
 
-    net_code=$(curl -s -o /dev/null -w "%{http_code}" --interface "$IFACE" --connect-timeout 4 --max-time 5 "$CHECK_URL" 2>/dev/null || echo "000")
-    if [ "$net_code" = "204" ]; then
+    if check_net_online; then
         net_status="🟢 Terhubung (Online)"
     else
-        net_status="🔴 Tidak Terhubung / Captive Redirect (HTTP $net_code)"
+        net_status="🔴 Tidak Terhubung / Captive Redirect"
     fi
 
     current_index=$(cut -d':' -f2 "$STATE_FILE" 2>/dev/null || echo "-1")
@@ -409,11 +425,10 @@ while true; do
                             USERNAME="Index tidak valid"
                         fi
 
-                        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --interface "$IFACE" --connect-timeout 4 --max-time 5 "$CHECK_URL" 2>/dev/null || echo "000")
-                        if [ "$HTTP_CODE" = "204" ]; then
+                        if check_net_online; then
                             NET_STATUS="🟢 Online (Terhubung)"
                         else
-                            NET_STATUS="🔴 Offline (HTTP $HTTP_CODE)"
+                            NET_STATUS="🔴 Offline / Perlu Login"
                         fi
 
                         CAP_IS_ACT=$(systemctl is-active captive.service 2>/dev/null || echo "inactive")
@@ -509,7 +524,10 @@ ${HIST_TEXT}---------------------------------------
                         "$CAPTIVE_BIN" >/dev/null 2>&1
 
                         sleep 2
-                        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --interface "$IFACE" --connect-timeout 4 --max-time 5 "$CHECK_URL" 2>/dev/null || echo "000")
+                        IS_CONNECTED=0
+                        if check_net_online; then
+                            IS_CONNECTED=1
+                        fi
 
                         # Cek akun aktif setelah login ulang
                         NEW_STATE=$(cat "$STATE_FILE" 2>/dev/null || echo "2000-01-01:-1")
@@ -532,10 +550,10 @@ ${HIST_TEXT}---------------------------------------
                             fi
                         fi
 
-                        if [ "$HTTP_CODE" = "204" ]; then
-                            LOGOUT_RESP+=$'\n'"📶 <b>Status Internet:</b> 🟢 Terhubung (HTTP 204)"
+                        if [ "$IS_CONNECTED" = "1" ]; then
+                            LOGOUT_RESP+=$'\n'"📶 <b>Status Internet:</b> 🟢 Terhubung (Online)"
                         else
-                            LOGOUT_RESP+=$'\n'"📶 <b>Status Internet:</b> 🟡 Sedang proses (HTTP $HTTP_CODE)"$'\n'"<i>Service captive di background akan terus mencoba menghubungkan setiap $CHECK_INTERVAL detik.</i>"
+                            LOGOUT_RESP+=$'\n'"📶 <b>Status Internet:</b> 🟡 Sedang proses / Mencoba menghubungkan"$'\n'"<i>Service captive di background akan terus mencoba menghubungkan setiap $CHECK_INTERVAL detik.</i>"
                         fi
 
                         LOGOUT_RESP+=$'\n'"🌐 <b>Portal:</b> <code>$LOGIN_URL</code>"
