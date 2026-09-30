@@ -11,7 +11,7 @@ Dibuat untuk kebutuhan PC Lab, server riset, atau mini PC (seperti Raspberry Pi)
 2. Jika koneksi terputus, skrip mengirim POST login ke captive portal PENS menggunakan akun yang dijadwalkan hari itu.
 3. Jika akun tersebut gagal atau muncul notifikasi *"You are already logged in 3 times"*, skrip otomatis beralih (*fallback*) ke akun cadangan berikutnya di daftar sampai berhasil terhubung.
 4. Riwayat akun aktif dicatat dalam rekap mingguan (`/var/local/rekap_mingguan.txt`).
-5. Notifikasi perubahan akun dikirim ke grup/chat Telegram, dan tersedia command `/cek_akun` untuk melihat akun yang sedang digunakan.
+5. Terintegrasi dengan Bot Telegram lengkap dengan **tombol menu interaktif** untuk monitoring status, histori rotasi, logout & login ulang, cek URL portal, serta pemantauan spesifikasi/resource VM.
 
 ---
 
@@ -144,9 +144,19 @@ sudo /usr/local/bin/captive.sh
 
 ---
 
-### Menu Tombol & Command Bot Telegram
+### Menu Tombol & Perintah Bot Telegram
 
-Bot ini dilengkapi fitur **Reply Keyboard Interaktif** (tombol menu di bawah layar chat Telegram) seperti pada aplikasi bot modern, sehingga user tidak perlu mengetik perintah manual—cukup klik tombol yang tersedia:
+Bot ini dilengkapi fitur **Tombol Interaktif (Inline Keyboard)** yang menempel langsung di bawah balon pesan chat Telegram, sehingga Anda dan rekan di grup cukup sekali klik tanpa perlu repot mengetik perintah teks:
+
+```text
+┌─────────────────────────┬─────────────────────────┐
+│    📊 Status Captive    │    📜 Riwayat Login     │
+├─────────────────────────┼─────────────────────────┤
+│ 🚪 Logout & Login Ulang │      🌐 URL Portal      │
+├─────────────────────────┼─────────────────────────┤
+│    ⚙️ Status Service    │   🖥 Info VM & Server   │
+└─────────────────────────┴─────────────────────────┘
+```
 
 | Tombol Menu | Perintah Teks | Fungsi |
 | :--- | :--- | :--- |
