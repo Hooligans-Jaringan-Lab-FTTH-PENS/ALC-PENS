@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Script Auto-Login Captive Portal PENS dengan Rotasi Akun
+# Script Auto-Login Captive Portal PENS dengan Rotasi Akun & Dukungan Logout
 # ==============================================================================
 
 # 1. Muat Konfigurasi
@@ -21,10 +21,21 @@ fi
 # shellcheck source=/dev/null
 source "$CONFIG_FILE"
 
-# Ekstraksi otomatis ORIGIN dari LOGIN_URL jika tidak diset manual
+# Nilai default untuk file state dan flags jika belum ada di config.env
+SESSION_FILE="${SESSION_FILE:-/var/local/captive_session.txt}"
+COOKIE_FILE="${COOKIE_FILE:-/var/local/captive_cookies.txt}"
+STATE_FILE="${STATE_FILE:-/var/local/captive_state.txt}"
+LOG_FILE="${LOG_FILE:-/var/local/rekap_mingguan.txt}"
+NOTIF_STATE="${NOTIF_STATE:-/var/local/last_notified.txt}"
+CHECK_URL="${CHECK_URL:-http://www.gstatic.com/generate_204}"
+
+# Ekstraksi otomatis ORIGIN dan ZONE dari LOGIN_URL jika tidak diset manual
 if [ -z "$ORIGIN" ]; then
     ORIGIN=$(echo "$LOGIN_URL" | sed -E 's|^(https?://[^/]+).*|\1|')
 fi
+
+ZONE=$(echo "$LOGIN_URL" | grep -oP '(?<=zone=)[^&]+' 2>/dev/null || echo "misc")
+[ -z "$ZONE" ] && ZONE="misc"
 
 # Validasi Akun
 NUM_ACCOUNTS=${#USERS[@]}
@@ -38,9 +49,113 @@ fi
 # Pastikan folder penyimpanan state & log ada
 mkdir -p "$(dirname "$STATE_FILE")" 2>/dev/null || true
 
-# 2. State Management (Memori akun aktif terakhir)
 TODAY=$(date +%Y-%m-%d)
 
+# ------------------------------------------------------------------------------
+# Fungsi: Logout dari Captive Portal
+# ------------------------------------------------------------------------------
+do_logout() {
+    echo "[INFO] Menjalankan proses logout dari Captive Portal PENS..."
+
+    # Baca akun aktif
+    STATE_DATA=$(cat "$STATE_FILE" 2>/dev/null || echo "2000-01-01:-1")
+    CURRENT_INDEX=$(echo "$STATE_DATA" | cut -d':' -f2)
+    ACTIVE_USER=""
+    if [ -n "$CURRENT_INDEX" ] && [ "$CURRENT_INDEX" -ge 0 ] 2>/dev/null && [ "$CURRENT_INDEX" -lt "$NUM_ACCOUNTS" ]; then
+        ACTIVE_USER="${USERS[$CURRENT_INDEX]}"
+    fi
+
+    LOGOUT_ID=""
+    if [ -f "$SESSION_FILE" ]; then
+        LOGOUT_ID=$(grep '^LOGOUT_ID=' "$SESSION_FILE" 2>/dev/null | cut -d'=' -f2-)
+    fi
+
+    # 1. Kirim request logout POST dengan logout_id jika ada
+    if [ -n "$LOGOUT_ID" ]; then
+        curl -k -s --interface "$IFACE" --connect-timeout 5 --max-time 8 -X POST "$LOGIN_URL" \
+            -b "$COOKIE_FILE" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -H "Origin: $ORIGIN" -H "Referer: $LOGIN_URL" \
+            -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" \
+            --data "zone=${ZONE}&logout_id=${LOGOUT_ID}&logout=Logout&accept=Logout" >/dev/null 2>&1 || true
+    fi
+
+    # 2. Kirim request logout POST umum (pfSense captive portal fallback)
+    curl -k -s --interface "$IFACE" --connect-timeout 5 --max-time 8 -X POST "$LOGIN_URL" \
+        -b "$COOKIE_FILE" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -H "Origin: $ORIGIN" -H "Referer: $LOGIN_URL" \
+        -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" \
+        --data "zone=${ZONE}&logout=Logout&action=Logout" >/dev/null 2>&1 || true
+
+    # 3. Kirim request logout GET fallback
+    curl -k -s --interface "$IFACE" --connect-timeout 5 --max-time 8 \
+        -b "$COOKIE_FILE" \
+        -H "Origin: $ORIGIN" -H "Referer: $LOGIN_URL" \
+        -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" \
+        "${ORIGIN}/index.php?zone=${ZONE}&logout=1" >/dev/null 2>&1 || true
+
+    # Bersihkan file sesi lama
+    rm -f "$SESSION_FILE" "$COOKIE_FILE" "$NOTIF_STATE"
+
+    # Pertahankan akun yang sama agar saat login ulang tetap mencoba akun ini terlebih dahulu
+    # (Hanya akan beralih ke akun berikutnya jika akun ini terkena batas limit 3x / gagal)
+    if [ -n "$CURRENT_INDEX" ] && [ "$CURRENT_INDEX" -ge 0 ] 2>/dev/null; then
+        echo "$TODAY:$CURRENT_INDEX" > "$STATE_FILE"
+    fi
+
+    echo "[SUCCESS] Logout berhasil diproses untuk akun: ${ACTIVE_USER:-Tidak diketahui}"
+    return 0
+}
+
+# ------------------------------------------------------------------------------
+# Fungsi: Status Singkat (CLI)
+# ------------------------------------------------------------------------------
+do_status() {
+    STATE_DATA=$(cat "$STATE_FILE" 2>/dev/null || echo "2000-01-01:-1")
+    CURRENT_INDEX=$(echo "$STATE_DATA" | cut -d':' -f2)
+    if [ "$CURRENT_INDEX" = "-1" ] || [ -z "$CURRENT_INDEX" ]; then
+        USERNAME="Tidak ada (Standby / Sedang Logged Out)"
+    elif [ "$CURRENT_INDEX" -lt "$NUM_ACCOUNTS" ] 2>/dev/null; then
+        USERNAME="${USERS[$CURRENT_INDEX]}"
+    else
+        USERNAME="Index tidak valid"
+    fi
+
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --interface "$IFACE" --connect-timeout 4 --max-time 5 "$CHECK_URL" 2>/dev/null || echo "000")
+    if [ "$HTTP_CODE" = "204" ]; then
+        NET_STATUS="Online (Terhubung)"
+    else
+        NET_STATUS="Offline / Perlu Login (HTTP $HTTP_CODE)"
+    fi
+
+    SERVICE_STATUS=$(systemctl is-active captive.service 2>/dev/null || echo "unknown")
+
+    echo "=== AutoLogin Captive Status ==="
+    echo "Interface         : $IFACE"
+    echo "Portal Login URL  : $LOGIN_URL"
+    echo "Akun Aktif        : $USERNAME"
+    echo "Status Internet   : $NET_STATUS"
+    echo "Service captive   : $SERVICE_STATUS"
+}
+
+# ------------------------------------------------------------------------------
+# Pengolahan Argumen Command Line
+# ------------------------------------------------------------------------------
+case "$1" in
+    --logout|logout)
+        do_logout
+        exit 0
+        ;;
+    --status|status)
+        do_status
+        exit 0
+        ;;
+esac
+
+# ------------------------------------------------------------------------------
+# 2. State Management (Memori akun aktif terakhir)
+# ------------------------------------------------------------------------------
 if [ ! -f "$STATE_FILE" ]; then
     echo "2000-01-01:-1" > "$STATE_FILE"
 fi
@@ -53,20 +168,24 @@ if ! [[ "$CURRENT_INDEX" =~ ^-?[0-9]+$ ]] || [ "$CURRENT_INDEX" -ge "$NUM_ACCOUN
     CURRENT_INDEX=-1
 fi
 
+# ------------------------------------------------------------------------------
 # 3. Pengecekan Jaringan
+# ------------------------------------------------------------------------------
 # Cek apakah interface dalam kondisi UP
 if ! ip link show "$IFACE" 2>/dev/null | grep -q "state UP"; then
     exit 0
 fi
 
 # Cek apakah internet sudah tersambung (HTTP 204 dari Google gstatic)
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --interface "$IFACE" --connect-timeout 5 "$CHECK_URL" 2>/dev/null)
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --interface "$IFACE" --connect-timeout 4 --max-time 5 "$CHECK_URL" 2>/dev/null || echo "000")
 if [ "$HTTP_CODE" = "204" ]; then
     # Internet sudah aktif, tidak perlu login
     exit 0
 fi
 
-# 4. Logika Rotasi Akun
+# ------------------------------------------------------------------------------
+# 4. Logika Rotasi Akun & Login
+# ------------------------------------------------------------------------------
 # Jika hari berganti, geser ke akun berikutnya
 if [ "$TODAY" != "$LAST_DATE" ]; then
     CURRENT_INDEX=$(( (CURRENT_INDEX + 1) % NUM_ACCOUNTS ))
@@ -85,7 +204,8 @@ while [ $ATTEMPTS -lt $NUM_ACCOUNTS ]; do
     PASSWORD="${PASSWORDS[$CURRENT_INDEX]}"
 
     DATA="auth_user=${USERNAME}&auth_pass=${PASSWORD}&redirurl=&accept=Login"
-    RESPONSE=$(curl -k -s --interface "$IFACE" --connect-timeout 8 -X POST "$LOGIN_URL" \
+    RESPONSE=$(curl -k -s --interface "$IFACE" --connect-timeout 8 --max-time 10 -X POST "$LOGIN_URL" \
+        -c "$COOKIE_FILE" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -H "Origin: $ORIGIN" -H "Referer: $LOGIN_URL" \
         -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" --data "$DATA" 2>/dev/null)
@@ -98,7 +218,28 @@ while [ $ATTEMPTS -lt $NUM_ACCOUNTS ]; do
         # 1. Simpan State Akun Aktif
         echo "$TODAY:$CURRENT_INDEX" > "$STATE_FILE"
 
-        # 2. Catat Riwayat Login
+        # 2. Ekstrak logout_id / session id jika tersedia pada halaman respon
+        LOGOUT_ID=$(echo "$RESPONSE" | grep -oP '(?<=name="logout_id" value=")[^"]+' | head -n1 2>/dev/null || true)
+        if [ -z "$LOGOUT_ID" ]; then
+            LOGOUT_ID=$(echo "$RESPONSE" | grep -oP '(?<=logout_id=)[a-zA-Z0-9_-]+' | head -n1 2>/dev/null || true)
+        fi
+
+        LOGOUT_URL="${ORIGIN}/index.php?zone=${ZONE}&logout=1"
+        if [ -n "$LOGOUT_ID" ]; then
+            LOGOUT_URL="${ORIGIN}/index.php?zone=${ZONE}&logout_id=${LOGOUT_ID}&logout=Logout"
+        fi
+
+        cat <<EOF > "$SESSION_FILE"
+LOGIN_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+USERNAME=$USERNAME
+LOGIN_URL=$LOGIN_URL
+ORIGIN=$ORIGIN
+ZONE=$ZONE
+LOGOUT_ID=$LOGOUT_ID
+LOGOUT_URL=$LOGOUT_URL
+EOF
+
+        # 3. Catat Riwayat Login
         DAY_KEY=$(LC_ALL=id_ID.UTF-8 date '+%A, %d %b' 2>/dev/null || date '+%a, %d %b')
         LOG_TIME=$(date '+%H:%M')
 
@@ -112,22 +253,37 @@ while [ $ATTEMPTS -lt $NUM_ACCOUNTS ]; do
         tail -n 7 "$LOG_FILE.tmp" > "$LOG_FILE" 2>/dev/null || true
         rm -f "$LOG_FILE.tmp"
 
-        # 3. Notifikasi Telegram (Hanya dikirim jika belum ada notifikasi untuk hari & akun ini)
+        # 4. Notifikasi Telegram (Hanya dikirim jika belum ada notifikasi untuk hari & akun ini)
         LAST_NOTIF=$(cat "$NOTIF_STATE" 2>/dev/null || echo "")
         if [ "$LAST_NOTIF" != "$TODAY:$CURRENT_INDEX" ] && [ -n "$BOT_TOKEN" ] && [ "$BOT_TOKEN" != "YOUR_BOT_TOKEN_HERE" ]; then
-            MSG="✅ <b>Autologin PENS Aktif</b>%0A📅 Tanggal: $(LC_ALL=id_ID.UTF-8 date '+%d %B %Y' 2>/dev/null || date '+%d %b %Y')%0A⏰ Jam: $(date '+%H:%M')%0A👤 Akun: <code>$USERNAME</code>%0A%0A📊 <b>Riwayat Rotasi Terakhir:</b>%0A---------------------------------------%0A"
+            DATE_STR=$(LC_ALL=id_ID.UTF-8 date '+%d %B %Y' 2>/dev/null || date '+%d %b %Y')
+            TIME_STR=$(date '+%H:%M')
 
+            MSG="✅ <b>Autologin PENS Aktif</b>
+📅 Tanggal: $DATE_STR
+⏰ Jam: $TIME_STR
+👤 Akun: <code>$USERNAME</code>
+🌐 Portal: <code>$LOGIN_URL</code>
+
+📊 <b>Riwayat Rotasi Terakhir:</b>
+---------------------------------------
+"
             if [ -f "$LOG_FILE" ]; then
                 while IFS= read -r line; do
-                    ENCODED_LINE=$(echo "$line" | sed 's/ /%20/g' | sed 's/|/%7C/g')
-                    MSG+="${ENCODED_LINE}%0A"
+                    MSG+="$line"$'\n'
                 done < "$LOG_FILE"
             fi
 
+            MSG+=$'\n'
+            MSG+="💡 <i>Gunakan tombol menu di bawah untuk aksi cepat:</i>"
+
+            KEYBOARD_JSON='{"inline_keyboard":[[{"text":"📊 Status Captive","callback_data":"/status"},{"text":"📜 Riwayat Login","callback_data":"/riwayat"}],[{"text":"🚪 Logout & Login Ulang","callback_data":"/logout"},{"text":"🌐 URL Portal","callback_data":"/url"}],[{"text":"⚙️ Status Service","callback_data":"/service"},{"text":"🖥 Info VM & Server","callback_data":"/vm"}]]}'
+
             curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
                 -d "chat_id=${CHAT_ID}" \
-                -d "text=${MSG}" \
-                -d "parse_mode=HTML" > /dev/null 2>&1 || true
+                --data-urlencode "text=${MSG}" \
+                -d "parse_mode=HTML" \
+                --data-urlencode "reply_markup=${KEYBOARD_JSON}" > /dev/null 2>&1 || true
 
             echo "$TODAY:$CURRENT_INDEX" > "$NOTIF_STATE"
         fi

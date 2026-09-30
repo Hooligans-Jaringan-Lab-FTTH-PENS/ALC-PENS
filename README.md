@@ -144,11 +144,20 @@ sudo /usr/local/bin/captive.sh
 
 ---
 
-### Command Bot Telegram
+### Menu Tombol & Command Bot Telegram
 
-Jika `captive-bot.service` dijalankan, bot menerima perintah berikut di chat/grup yang terdaftar:
-- `/cek_akun` atau `/status` : Menampilkan informasi akun yang sedang aktif dan waktu login.
-- `/help` : Menampilkan ringkasan perintah bot.
+Bot ini dilengkapi fitur **Reply Keyboard Interaktif** (tombol menu di bawah layar chat Telegram) seperti pada aplikasi bot modern, sehingga user tidak perlu mengetik perintah manual—cukup klik tombol yang tersedia:
+
+| Tombol Menu | Perintah Teks | Fungsi |
+| :--- | :--- | :--- |
+| **`📊 Status Captive`** | `/status` / `/cek_akun` | Cek akun aktif, status internet, riwayat rotasi, & ringkasan VM |
+| **`📜 Riwayat Login`** | `/riwayat` / `/rekap` | **Lihat daftar histori akun siapa saja & kapan pernah login** |
+| **`🚪 Logout & Login Ulang`** | `/logout` | Logout sesi aktif portal & login ulang (tetap gunakan akun ini jika masih valid) |
+| **`🌐 URL Portal`** | `/url` / `/portal` | Minta URL portal login aktif & link logout manual |
+| **`⚙️ Status Service`** | `/service` / `/cek_service` | Cek apakah service captive sedang 🟢 HIDUP atau 🔴 MATI |
+| **`🖥 Info VM & Server`** | `/vm` / `/vmstatus` | Pantau kondisi & spesifikasi lengkap VM (CPU, RAM, Disk, Uptime, IP) |
+
+> 💡 **Notifikasi Otomatis Startup VM:** Setiap kali VM dinyalakan atau service bot di-restart, bot akan otomatis mengirimkan notifikasi spesifikasi dan status VM ke Telegram lengkap dengan tombol menu interaktif jika opsi `NOTIFY_VM_ON_START="true"` diaktifkan di konfigurasi.
 
 ---
 
@@ -163,3 +172,4 @@ sudo ./uninstall.sh
 
 ### Catatan Keamanan
 Kredensial akun mahasiswa dan token bot disimpan terpisah di `/etc/captive/config.env` dengan hak akses `chmod 600` (hanya bisa dibaca root). File konfigurasi lokal juga sudah dimasukkan ke `.gitignore` sehingga tidak akan terbawa saat push ke git.
+

@@ -38,7 +38,7 @@ echo -e "${GREEN}✓ Layanan dan skrip berhasil dicopot.${NC}"
 read -r -p "Apakah Anda ingin menghapus file konfigurasi & riwayat log (/etc/captive dan /var/local/captive*)? [y/N]: " CONFIRM
 if [[ "$CONFIRM" =~ ^[yY]$ ]]; then
     rm -rf /etc/captive
-    rm -f /var/local/captive_state.txt /var/local/rekap_mingguan.txt /var/local/last_notified.txt
+    rm -f /var/local/captive_state.txt /var/local/rekap_mingguan.txt /var/local/last_notified.txt /var/local/captive_session.txt /var/local/captive_cookies.txt
     echo -e "${GREEN}✓ Konfigurasi dan file log berhasil dibersihkan.${NC}"
 else
     echo -e "${YELLOW}Konfigurasi di /etc/captive tetap disimpan.${NC}"
